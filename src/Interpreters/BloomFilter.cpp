@@ -118,6 +118,8 @@ bool BloomFilter::findHashWithSeed(const UInt64 & hash, const UInt64 & hash_seed
 
 DataTypePtr BloomFilter::getPrimitiveType(const DataTypePtr & data_type)
 {
+    std::cerr << "BloomFilter::getPrimitiveType " << data_type->getName() << std::endl;
+
     if (const auto * array_type = typeid_cast<const DataTypeArray *>(data_type.get()))
     {
         if (!typeid_cast<const DataTypeArray *>(array_type->getNestedType().get()))

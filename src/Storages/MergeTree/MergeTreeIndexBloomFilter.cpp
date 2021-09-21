@@ -35,6 +35,13 @@ MergeTreeIndexBloomFilter::MergeTreeIndexBloomFilter(
     , bits_per_row(bits_per_row_)
     , hash_functions(hash_functions_)
 {
+    std::cerr << "MergeTreeIndexBloomFilter::MergeTreeIndexBloomFilter bits per row " << bits_per_row_ << " hash functions " << hash_functions_ << std::endl;
+    auto columns = getColumnsRequiredForIndexCalc();
+    for (auto & column : columns)
+    {
+        std::cerr << "Column name " << column << std::endl;
+    }
+
     assert(bits_per_row != 0);
     assert(hash_functions != 0);
 }

@@ -71,6 +71,21 @@ bool maybeTrueOnBloomFilter(const IColumn * hash_column, const BloomFilterPtr & 
     if (!const_column && !non_const_column)
         throw Exception("LOGICAL ERROR: hash column must be Const Column or UInt64 Column.", ErrorCodes::LOGICAL_ERROR);
 
+    if (non_const_column)
+    {
+        std::cerr << "Non const column" << std::endl;
+
+        const auto & data = non_const_column->getData();
+        for (const auto & hash_element : data)
+        {
+            std::cerr << "Hash element " << hash_element << std::endl;
+        }
+    }
+    if (const_column)
+    {
+        std::cerr << "Const column " << const_column->getField().dump() << std::endl;
+    }
+
     if (const_column)
     {
         return hashMatchesFilter(bloom_filter,
@@ -110,6 +125,8 @@ MergeTreeIndexConditionBloomFilter::MergeTreeIndexConditionBloomFilter(
     const SelectQueryInfo & info_, ContextPtr context_, const Block & header_, size_t hash_functions_)
     : WithContext(context_), header(header_), query_info(info_), hash_functions(hash_functions_)
 {
+    std::cerr << "MergeTreeIndexConditionBloomFilter::MergeTreeIndexConditionBloomFilter" << std::endl;
+
     auto atom_from_ast = [this](auto & node, auto, auto & constants, auto & out) { return traverseAtomAST(node, constants, out); };
     rpn = std::move(RPNBuilder<RPNElement>(info_, getContext(), atom_from_ast).extractRPN());
 }
@@ -117,6 +134,8 @@ MergeTreeIndexConditionBloomFilter::MergeTreeIndexConditionBloomFilter(
 bool MergeTreeIndexConditionBloomFilter::alwaysUnknownOrTrue() const
 {
     std::vector<bool> rpn_stack;
+
+    std::cerr << "MergeTreeIndexConditionBloomFilter::alwaysUnknownOrTrue start" << std::endl;
 
     for (const auto & element : rpn)
     {
@@ -158,11 +177,15 @@ bool MergeTreeIndexConditionBloomFilter::alwaysUnknownOrTrue() const
             throw Exception("Unexpected function type in KeyCondition::RPNElement", ErrorCodes::LOGICAL_ERROR);
     }
 
+    std::cerr << "MergeTreeIndexConditionBloomFilter::alwaysUnknownOrTrue finish " << rpn_stack[0] << std::endl;
+
     return rpn_stack[0];
 }
 
 bool MergeTreeIndexConditionBloomFilter::mayBeTrueOnGranule(const MergeTreeIndexGranuleBloomFilter * granule) const
 {
+    std::cerr << "MergeTreeIndexConditionBloomFilter::mayBeTrueOnGranule " << std::endl;
+
     std::vector<BoolMask> rpn_stack;
     const auto & filters = granule->getFilters();
 
@@ -183,18 +206,23 @@ bool MergeTreeIndexConditionBloomFilter::mayBeTrueOnGranule(const MergeTreeIndex
             bool match_rows = true;
             bool match_all = element.function == RPNElement::FUNCTION_HAS_ALL;
             const auto & predicate = element.predicate;
+
+            std::cerr << "Predicate size " << predicate.size() << std::endl;
             for (size_t index = 0; match_rows && index < predicate.size(); ++index)
             {
                 const auto & query_index_hash = predicate[index];
                 const auto & filter = filters[query_index_hash.first];
                 const ColumnPtr & hash_column = query_index_hash.second;
 
+                std::cerr << "HashColumn " << hash_column->dumpStructure() << std::endl;
 
                 match_rows = maybeTrueOnBloomFilter(&*hash_column,
                                                     filter,
                                                     hash_functions,
                                                     match_all);
             }
+
+            std::cerr << "Match rows " << match_rows << std::endl;
 
             rpn_stack.emplace_back(match_rows, true);
             if (element.function == RPNElement::FUNCTION_NOT_EQUALS || element.function == RPNElement::FUNCTION_NOT_IN)
@@ -423,6 +451,8 @@ static bool indexOfCanUseBloomFilter(const ASTPtr & parent)
 bool MergeTreeIndexConditionBloomFilter::traverseASTEquals(
     const String & function_name, const ASTPtr & key_ast, const DataTypePtr & value_type, const Field & value_field, RPNElement & out, const ASTPtr & parent)
 {
+    std::cerr << "MergeTreeIndexConditionBloomFilter::traverseASTEquals " << function_name << " key ast " << key_ast->formatForErrorMessage() << std::endl;
+
     if (header.has(key_ast->getColumnName()))
     {
         size_t position = header.getPositionByName(key_ast->getColumnName());
@@ -513,7 +543,7 @@ bool MergeTreeIndexConditionBloomFilter::traverseASTEquals(
 
         if (function->name == "arrayElement")
         {
-            auto & col_name = assert_cast<ASTIdentifier *>(function->arguments.get()->children[0].get())->name();
+            const auto & col_name = assert_cast<ASTIdentifier *>(function->arguments.get()->children[0].get())->name();
 
             if (header.has(col_name))
             {
@@ -524,11 +554,22 @@ bool MergeTreeIndexConditionBloomFilter::traverseASTEquals(
                 {
                     out.function = function_name == "equals" ? RPNElement::FUNCTION_EQUALS : RPNElement::FUNCTION_NOT_EQUALS;
                     const DataTypePtr actual_type = BloomFilter::getPrimitiveType(index_type);
-                    /// TODO :: Here, we assume the second argument of arrayElement is const string, need to support column and other data types.
-                    auto & element_key = assert_cast<ASTIdentifier *>(function->arguments.get()->children[1].get())->name();
-                    Field element_key_field = element_key;
+                    /// TODO :: Here, we assume the second argument of arrayElement is const string, need to support column and other data types
 
-                    out.predicate.emplace_back(std::make_pair(position, BloomFilterHash::hashWithField(actual_type.get(), element_key_field)));
+                    auto & argument = function->arguments.get()->children[1];
+
+                    if (const auto * literal = argument->as<ASTLiteral>())
+                    {
+                        std::cerr << "MergeTreeIndexConditionBloomFilter::traverseASTEquals add predicate " << std::endl;
+                        auto element_key = literal->value;
+                        out.predicate.emplace_back(std::make_pair(position, BloomFilterHash::hashWithField(actual_type.get(), element_key)));
+                    }
+                    else
+                    {
+                        std::cerr << "MergeTreeIndexConditionBloomFilter::traverseASTEquals argument is not literal " << argument->formatForErrorMessage() << std::endl;
+                        return false;
+                    }
+
                     return true;
                 }
             }
